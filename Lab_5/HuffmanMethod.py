@@ -99,7 +99,6 @@ def main_huffman():
         all_words_str = ", ".join(words_list)
         all_probs_str = "; ".join(probs_list)
 
-        # H(S) - ЕНТРОПІЯ НА ОСНОВІ ЧАСТОТ ОТРИМАНИХ СЛІВ БЛОКУ
         H_Sl = -sum(prob * log_b(prob) for name, prob in symbol_probs if prob > 0)
         print(f"Ентропія отриманих слів H(S) = {H_Sl:.4f} {unit}/блок")
 
