@@ -4,6 +4,7 @@ import uuid
 from dotenv import load_dotenv
 import telebot
 from telebot import types
+import hashlib
 
 # 1. Завантажуємо змінні оточення
 load_dotenv()
@@ -24,7 +25,7 @@ if "quizzes" not in db:
 db.sync()
 
 # Тимчасова оперативна пам'ять для сесій редагування/створення тестів
-# Сюди копіюються дані під час редагування, щоб можна було "Скасувати зміни" (Блок [53], [54])
+# Сюди копіюються дані під час редагування, щоб можна було "Скасувати зміни"
 edit_sessions = {}
 
 
@@ -60,10 +61,10 @@ def menu_router(message):
         cmd_list_edit(message)
 
 
-# --- БЛОК [1]: ФУНКЦІЯ /create ТА ІНІЦІАЛІЗАЦІЯ ---
+# --- ФУНКЦІЯ /create ТА ІНІЦІАЛІЗАЦІЯ ---
 def cmd_create(message):
     user_id = str(message.from_user.id)
-    msg = bot.send_message(message.chat.id, "📝 [Блок 2,3] Введіть унікальну НАЗВУ для вашого нового тесту:")
+    msg = bot.send_message(message.chat.id, "📝 Введіть НАЗВУ для вашого нового тесту:")
     bot.register_next_step_handler(msg, process_init_title, user_id)
 
 
@@ -84,13 +85,13 @@ def process_init_title(message, user_id):
         "questions": [
             {"text": "Перше запитання (натисніть редагувати)", "options": ["Варіант 1", "Варіант 2"], "correct": 0}
         ],
-        "current_q_idx": 0,  # Поточне обране питання (Блок [10], [34])
-        "is_new": True  # Ознака для Блоку [63]
+        "current_q_idx": 0,  # Поточне обране запитання
+        "is_new": True
     }
     show_editor_dashboard(message.chat.id, user_id)
 
 
-# --- СПИСОК ДЛЯ РЕДАГУВАННЯ (Блок [5]) ---
+# --- СПИСОК ДЛЯ РЕДАГУВАННЯ ---
 def cmd_list_edit(message):
     user_id = str(message.from_user.id)
     my_quizzes = {q_id: q for q_id, q in db["quizzes"].items() if q["creator_id"] == user_id}
@@ -103,17 +104,17 @@ def cmd_list_edit(message):
     for q_id, q_data in my_quizzes.items():
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🛠️ Редагувати цей тест", callback_data=f"ed_load_{q_id}"))
-        bot.send_message(message.chat.id, f"🔸 Тест: *{q_data['title']}*", reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"🔸 Тест: *{q_data['title']}* (ID: `{q_id}`)", reply_markup=markup, parse_mode="Markdown")
 
 
-# --- БЛОК [34]: ІНТЕРАКТИВНИЙ ДАШБОРД РЕДАКТОРА ---
+# --- ІНТЕРАКТИВНИЙ ДАШБОРД РЕДАКТОРА ---
 def show_editor_dashboard(chat_id, user_id, message_id=None):
     session = edit_sessions.get(user_id)
     if not session:
         bot.send_message(chat_id, "⌛ Сесію редагування закрито або застаріла.")
         return
 
-    # Формування тексту статусу тесту (Блок [34])
+    # Формування тексту статусу тесту
     text = f"🛠️ **РЕДАКТОР ТЕСТУ**\n"
     text += f"Назва: *{session['title']}*\n"
     text += f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -122,7 +123,7 @@ def show_editor_dashboard(chat_id, user_id, message_id=None):
     curr_idx = session["current_q_idx"]
 
     if not questions:
-        text += "⚠️ [Блок 40] У тесті немає жодного питання!\n"
+        text += "⚠️ У тесті немає жодного запитання!\n"
     else:
         text += f"📋 Всього питань: {len(questions)}\n\n"
         for i, q in enumerate(questions):
@@ -133,35 +134,38 @@ def show_editor_dashboard(chat_id, user_id, message_id=None):
                     chk = "✅" if j == q["correct"] else "◻️"
                     text += f"      {chk} {j + 1}. {opt}\n"
 
-        text += f"\n👉 *Поточне питання для редагування: №{curr_idx + 1}*"
+        text += f"\n👉 *Поточне запитання для редагування: №{curr_idx + 1}*"
 
     # Генерація кнопок дій згідно з блок-схемою
     markup = types.InlineKeyboardMarkup(row_width=2)
 
     # Кнопки для тесту загалом
-    markup.row(types.InlineKeyboardButton("📝 Редагувати назву тесту [15]", callback_data="ed_action_title"))
+    markup.row(types.InlineKeyboardButton("📝 Редагувати назву тесту", callback_data="ed_action_title"))
 
     # Кнопки для питань
     markup.row(
-        types.InlineKeyboardButton("➕ Додати питання [31]", callback_data="ed_action_addq"),
-        types.InlineKeyboardButton("✏️ Виправити текст [19]", callback_data="ed_action_editq")
+        types.InlineKeyboardButton("➕ Додати запитання", callback_data="ed_action_addq"),
+        types.InlineKeyboardButton("✏️ Виправити текст", callback_data="ed_action_editq")
     )
     markup.row(
-        types.InlineKeyboardButton("🔢 Обрати інше поточне [28]", callback_data="ed_action_selq"),
-        types.InlineKeyboardButton("🗑️ Видалити поточне питання [41]", callback_data="ed_action_delq")
+        types.InlineKeyboardButton("🔢 Обрати інше поточне", callback_data="ed_action_selq"),
+        types.InlineKeyboardButton("🗑️ Видалити поточне запитання", callback_data="ed_action_delq")
     )
 
     # Кнопки для відповідей
     markup.row(
-        types.InlineKeyboardButton("➕ Додати відповідь [12]", callback_data="ed_action_addans"),
-        types.InlineKeyboardButton("🗑️ Видалити відповідь [46]", callback_data="ed_action_delans")
+        types.InlineKeyboardButton("➕ Додати відповідь", callback_data="ed_action_addans"),
+        types.InlineKeyboardButton("🗑️ Видалити відповідь", callback_data="ed_action_delans")
     )
-    markup.row(types.InlineKeyboardButton("🎯 Обрати/Змінити правильну [25]", callback_data="ed_action_setcorr"))
+    markup.row(types.InlineKeyboardButton("🎯 Обрати/Змінити правильну", callback_data="ed_action_setcorr"))
+
+    # Кнопка для встановлення паролю
+    markup.add(types.InlineKeyboardButton("🔑 Пароль", callback_data="ed_action_password"))
 
     # Фінальні кнопки (Збереження / Скасування)
     markup.row(
-        types.InlineKeyboardButton("💾 ЗБЕРЕГТИ ЗМІНИ [62]", callback_data="ed_action_save"),
-        types.InlineKeyboardButton("❌ Скасувати зміни [53]", callback_data="ed_action_cancel")
+        types.InlineKeyboardButton("💾 ЗБЕРЕГТИ ЗМІНИ", callback_data="ed_action_save"),
+        types.InlineKeyboardButton("❌ Скасувати зміни", callback_data="ed_action_cancel")
     )
 
     if message_id:
@@ -197,6 +201,10 @@ def handle_editor_callbacks(call):
             show_editor_dashboard(chat_id, user_id)
         return
 
+    if call.data.startswith("ed_pwd_") or call.data == "ed_action_back":
+        handle_password_actions(call)  # Викликаємо окрему функцію для паролів
+        return
+
     session = edit_sessions.get(user_id)
     if not session:
         bot.answer_callback_query(call.id, "Сесія не знайдена.")
@@ -205,108 +213,197 @@ def handle_editor_callbacks(call):
     action = call.data.replace("ed_action_", "")
     bot.answer_callback_query(call.id)
 
-    # 1. Редагувати назву тесту [Блок 15]
+    # 1. Редагувати назву тесту
     if action == "title":
         msg = bot.send_message(chat_id, "Введіть НОВУ назву для цього тесту:")
         bot.register_next_step_handler(msg, input_edit_title, user_id)
 
-    # 2. Додати нове питання [Блок 31]
+    # 2. Додати нове запитання
     elif action == "addq":
-        msg = bot.send_message(chat_id, " [Блок 6] Введіть ТЕКСТ нового запитання:")
+        msg = bot.send_message(chat_id, " Введіть ТЕКСТ нового запитання:")
         bot.register_next_step_handler(msg, input_add_question, user_id)
 
-    # 3. Виправити поточне питання [Блок 19]
+    # 3. Виправити поточне запитання
     elif action == "editq":
         if not session["questions"]:
             bot.send_message(chat_id, "❌ Немає питань для редагування.")
             return
-        msg = bot.send_message(chat_id, f" [Блок 20] Введіть НОВИЙ текст для питання №{session['current_q_idx'] + 1}:")
+        msg = bot.send_message(chat_id, f" Введіть НОВИЙ текст для запитання №{session['current_q_idx'] + 1}:")
         bot.register_next_step_handler(msg, input_edit_question, user_id)
 
-    # 4. Обрати інше питання як поточне [Блок 28]
+    # 4. Обрати інше запитання як поточне
     elif action == "selq":
         if not session["questions"]:
             bot.send_message(chat_id, "❌ Список питань порожній.")
             return
         msg = bot.send_message(chat_id,
-                               f"🔢 [Блок 39] Введіть номер питання, яке зробити поточним (1-{len(session['questions'])}):")
+                               f"🔢 Введіть номер запитання, яке зробити поточним (1-{len(session['questions'])}):")
         bot.register_next_step_handler(msg, input_select_question, user_id)
 
-    # 5. Видалити поточне питання [Блок 41]
+    # 5. Видалити поточне запитання
     elif action == "delq":
-        if not session["questions"]:  # Блок [43] - питання існують? (Hi)
-            bot.send_message(chat_id, "⚠️ [Блок 40] Питання відсутні. Нічого видаляти.")
+        if not session["questions"]:  # Запитання існують? (Hi)
+            bot.send_message(chat_id, "⚠️ Запитання відсутні. Нічого видаляти.")
             return
 
-        # Блок [73] - Видалення питання
+        # Видалення запитання
         del session["questions"][session["current_q_idx"]]
-        session["current_q_idx"] = 0  # Обрання першого питання поточним
+        session["current_q_idx"] = 0  # Обрання першого запитання поточним
         show_editor_dashboard(chat_id, user_id)
 
-    # 6. Додати відповідь [Блок 12]
+    # 6. Додати відповідь
     elif action == "addans":
         if not session["questions"]:
-            bot.send_message(chat_id, "❌ Спочатку додайте питання!")
+            bot.send_message(chat_id, "❌ Спочатку додайте запитання!")
             return
-        msg = bot.send_message(chat_id, "📝 [Блок 14] Введіть текст нової відповіді:")
+        msg = bot.send_message(chat_id, "📝 Введіть текст нової відповіді:")
         bot.register_next_step_handler(msg, input_add_answer, user_id)
 
-    # 7. Видалити відповідь [Блок 46]
+    # 7. Видалити відповідь
     elif action == "delans":
         if not session["questions"]: return
         q = session["questions"][session["current_q_idx"]]
 
-        # Блок [48] - Відповідей більше ніж 2?
+        # Відповідей більше ніж 2?
         if len(q["options"]) <= 2:
-            bot.send_message(chat_id, "❌ [Блок 55] Помилка! У питанні має залишатися мінімум 2 відповіді.")  # Блок [55]
+            bot.send_message(chat_id, "❌ Помилка! У питанні має залишатися мінімум 2 відповіді.")
             return
 
-        msg = bot.send_message(chat_id, f"🗑️ [Блок 50] Введіть номер відповіді для видалення (1-{len(q['options'])}):")
+        msg = bot.send_message(chat_id, f"🗑️ Введіть номер відповіді для видалення (1-{len(q['options'])}):")
         bot.register_next_step_handler(msg, input_delete_answer, user_id)
 
-    # 8. Обрати/змінити правильну відповідь [Блок 25]
+    # 8. Обрати/змінити правильну відповідь
     elif action == "setcorr":
         if not session["questions"]: return
         q = session["questions"][session["current_q_idx"]]
-        msg = bot.send_message(chat_id, f"🎯 [Блок 24] Введіть номер правильної відповіді (1-{len(q['options'])}):")
+        msg = bot.send_message(chat_id, f"🎯 Введіть номер правильної відповіді (1-{len(q['options'])}):")
         bot.register_next_step_handler(msg, input_set_correct, user_id)
 
-    # 9. СКАСУВАТИ ЗМІНИ [Блок 53]
+    # Додати пароль
+    elif action == "password":
+        # Отримуємо дані з БД (якщо тест ще не збережено, дивимось у тимчасову сесію)
+        quiz_id = session["quiz_id"]
+        # Перевіряємо в БД, чи вже є такий тест, щоб дізнатися статус пароля
+        quiz_data = db["quizzes"].get(quiz_id, {})
+        is_protected = quiz_data.get("is_password_protected", False)
+
+        markup = types.InlineKeyboardMarkup()
+        if is_protected:
+            markup.row(types.InlineKeyboardButton("🔄 Змінити пароль", callback_data="ed_pwd_set"))
+            markup.row(types.InlineKeyboardButton("🗑️ Видалити пароль", callback_data="ed_pwd_del"))
+        else:
+            markup.row(types.InlineKeyboardButton("➕ Встановити пароль", callback_data="ed_pwd_set"))
+
+        markup.row(types.InlineKeyboardButton("🔙 Назад до меню", callback_data="ed_action_back"))
+        bot.edit_message_text("🔑 **Керування паролем тесту:**", chat_id, call.message.message_id, reply_markup=markup,
+                              parse_mode="Markdown")
+
+    # 9. СКАСУВАТИ ЗМІНИ
     elif action == "cancel":
         if user_id in edit_sessions:
-            del edit_sessions[user_id]  # Блок [54] Видалення тимчасових змін з ОЗП
+            del edit_sessions[user_id]  # Видалення тимчасових змін з ОЗП
         bot.delete_message(chat_id, call.message.message_id)
         bot.send_message(chat_id, "❌ Редагування скасовано. Усі незбережені зміни видалено.",
                          reply_markup=get_main_menu())
 
-    # 10. ЗБЕРЕГТИ ЗМІНИ [Блок 62]
+    # 10. ЗБЕРЕГТИ ЗМІНИ
     elif action == "save":
         # Валідація перед збереженням
         if not session["questions"]:
             bot.send_message(chat_id, "❌ Не можна зберегти тест без питань!")
             return
 
+        # Перевірка на унікальність ID при створенні нового тесту
         quiz_id = session["quiz_id"]
+        if session["is_new"]:
+            while quiz_id in db["quizzes"]:
+                quiz_id = str(uuid.uuid4())[:8]
+            session["quiz_id"] = quiz_id
 
-        # Запис даних з оперативної пам'яті в постійну комірку оригінального тесту [Блок 65]
-        db["quizzes"][quiz_id] = {
-            "title": session["title"],
-            "creator_id": session["creator_id"],
-            "questions": session["questions"]
-        }
+            # Ініціалізація нових полів для НОВОГО тесту
+            new_test_data = {
+                "title": session["title"],
+                "creator_id": session["creator_id"],
+                "questions": session["questions"],
+                "rating": [],  # Порожній список для рейтингу
+                "password_hash": None,  # Хеш пароля (None, якщо немає)
+                "is_password_protected": False
+            }
+            db["quizzes"][quiz_id] = new_test_data
+        else:
+            # Оновлення існуючого (пароль та рейтинг не чіпаємо)
+            db["quizzes"][quiz_id].update({
+                "title": session["title"],
+                "questions": session["questions"]
+            })
+
         db.sync()
 
-        # Перевірка: Е новим тестом? [Блок 63]
+        # Перевірка: Є новим тестом?
         if session["is_new"]:
-            bot.send_message(chat_id, f"🎉 [Блок 69] Тест успішно створено! ID: `{quiz_id}`", parse_mode="Markdown",
+            bot.send_message(chat_id, f"🎉 Тест успішно створено! ID: `{quiz_id}`", parse_mode="Markdown",
                              reply_markup=get_main_menu())
         else:
-            bot.send_message(chat_id, "💾 [Блок 71] Зміни успішно збережено в оригінальний тест!",
+            bot.send_message(chat_id, "💾 Зміни успішно збережено в оригінальний тест!",
                              reply_markup=get_main_menu())
 
         del edit_sessions[user_id]
         bot.delete_message(chat_id, call.message.message_id)
 
+
+# --- ОБРОБКА ДІЙ З ПАРОЛЕМ ---
+def handle_password_actions(call):
+    user_id = str(call.from_user.id)
+    chat_id = call.message.chat.id
+    session = edit_sessions.get(user_id)
+
+    if not session:
+        bot.answer_callback_query(call.id, "Сесія не знайдена.")
+        return
+
+    # Обробка кнопки "Назад"
+    if call.data == "ed_action_back":
+        show_editor_dashboard(chat_id, user_id, call.message.message_id)
+        return
+
+    # Обробка встановлення/зміни пароля
+    if call.data == "ed_pwd_set":
+        msg = bot.send_message(chat_id, "🔐 Введіть новий пароль для тесту:")
+        bot.register_next_step_handler(msg, process_set_password, user_id)
+
+    # Обробка видалення пароля
+    elif call.data == "ed_pwd_del":
+        quiz_id = session["quiz_id"]
+        # Якщо тест вже в БД, оновлюємо його
+        if quiz_id in db["quizzes"]:
+            db["quizzes"][quiz_id].update({
+                "is_password_protected": False,
+                "password_hash": None
+            })
+            db.sync()
+
+        bot.answer_callback_query(call.id, "Пароль видалено")
+        show_editor_dashboard(chat_id, user_id, call.message.message_id)
+
+
+def process_set_password(message, user_id):
+    password = message.text.strip()
+    session = edit_sessions.get(user_id)
+    if not session: return
+
+    quiz_id = session["quiz_id"]
+    hashed = hash_password(password)
+
+    # Оновлюємо базу даних
+    if quiz_id in db["quizzes"]:
+        db["quizzes"][quiz_id].update({
+            "is_password_protected": True,
+            "password_hash": hashed
+        })
+        db.sync()
+
+    bot.send_message(message.chat.id, "✅ Пароль успішно встановлено!")
+    show_editor_dashboard(message.chat.id, user_id)
 
 # --- ФУНКЦІЇ ВВЕДЕННЯ ТЕКСТУ (NEXT STEP HANDLERS) ---
 
@@ -322,7 +419,7 @@ def input_add_question(message, user_id):
     if text:
         new_q = {"text": text, "options": ["Варіант 1", "Варіант 2"], "correct": 0}
         edit_sessions[user_id]["questions"].append(new_q)
-        # Автоматично робимо нове питання поточним
+        # Автоматично робимо нове запитання поточним
         edit_sessions[user_id]["current_q_idx"] = len(edit_sessions[user_id]["questions"]) - 1
     show_editor_dashboard(message.chat.id, user_id)
 
@@ -341,7 +438,7 @@ def input_select_question(message, user_id):
         if 0 <= num < len(edit_sessions[user_id]["questions"]):
             edit_sessions[user_id]["current_q_idx"] = num
         else:
-            bot.send_message(message.chat.id, "❌ Невірний номер питання.")
+            bot.send_message(message.chat.id, "❌ Неправильний номер запитання.")
     except:
         bot.send_message(message.chat.id, "❌ Потрібно ввести число.")
     show_editor_dashboard(message.chat.id, user_id)
@@ -366,7 +463,7 @@ def input_delete_answer(message, user_id):
             # Захист від виходу за межі індексу правильної відповіді
             q["correct"] = 0
         else:
-            bot.send_message(message.chat.id, "❌ Невірний номер відповіді.")
+            bot.send_message(message.chat.id, "❌ Неправильний номер відповіді.")
     except:
         bot.send_message(message.chat.id, "❌ Потрібно ввести число.")
     show_editor_dashboard(message.chat.id, user_id)
@@ -379,12 +476,15 @@ def input_set_correct(message, user_id):
         num = int(message.text.strip()) - 1
 
         if 0 <= num < len(q["options"]):
-            q["correct"] = num  # [Блок 37] Маркування відповіді як правильної
+            q["correct"] = num  # Маркування відповіді як правильної
         else:
             bot.send_message(message.chat.id, "❌ Такого номера відповіді не існує.")
     except:
         bot.send_message(message.chat.id, "❌ Потрібно ввести число.")
     show_editor_dashboard(message.chat.id, user_id)
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
 # --- ЗАПУСК БОТА ---
