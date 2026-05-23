@@ -28,6 +28,11 @@ db.sync()
 # Сюди копіюються дані під час редагування, щоб можна було "Скасувати зміни"
 edit_sessions = {}
 
+def get_safe_text(message):
+    # Повертає текст, якщо він є, або None, якщо це інший тип повідомлення
+    if message.content_type == 'text':
+        return message.text.strip()
+    return None
 
 # --- ГОЛОВНЕ МЕНЮ ТА СТАРТ ---
 def get_main_menu():
@@ -60,18 +65,26 @@ def menu_router(message):
     elif message.text == "📋 Мої тести / Редагувати":
         cmd_list_edit(message)
 
+def get_user_quiz_count(user_id):
+    return len([q_id for q_id, q in db["quizzes"].items() if q["creator_id"] == user_id])
 
 # --- ФУНКЦІЯ /create ТА ІНІЦІАЛІЗАЦІЯ ---
 def cmd_create(message):
     user_id = str(message.from_user.id)
+
+    # ПЕРЕВІРКА ЛІМІТУ
+    if get_user_quiz_count(user_id) >= 25:
+        bot.send_message(message.chat.id, "❌ Ви досягли ліміту: максимум 25 тестів.")
+        return
+
     msg = bot.send_message(message.chat.id, "📝 Введіть НАЗВУ для вашого нового тесту:")
     bot.register_next_step_handler(msg, process_init_title, user_id)
 
 
 def process_init_title(message, user_id):
-    title = message.text.strip()
+    title = get_safe_text()
     if not title:
-        msg = bot.send_message(message.chat.id, "❌ Назва не може бути порожньою. Введіть ще раз:")
+        msg = bot.send_message(message.chat.id, "❌ Назва не може бути порожньою або бути НЕ текстом. Введіть ще раз:")
         bot.register_next_step_handler(msg, process_init_title, user_id)
         return
 
