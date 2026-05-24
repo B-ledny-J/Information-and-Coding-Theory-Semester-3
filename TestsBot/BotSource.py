@@ -37,7 +37,7 @@ def get_safe_text(message):
 # --- ГОЛОВНЕ МЕНЮ ТА СТАРТ ---
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton("➕ Створити тест"), types.KeyboardButton("📋 Мої тести / Редагувати"))
+    markup.row(types.KeyboardButton("➕ Створити тест"), types.KeyboardButton("📋 Мої тести / Редагувати"), types.KeyboardButton("🔍 Знайти тест"))
     return markup
 
 
@@ -58,12 +58,14 @@ def start_handler(message):
     )
 
 
-@bot.message_handler(func=lambda m: m.text in ["➕ Створити тест", "📋 Мої тести / Редагувати"])
+@bot.message_handler(func=lambda m: m.text in ["➕ Створити тест", "📋 Мої тести / Редагувати", "🔍 Знайти тест"])
 def menu_router(message):
     if message.text == "➕ Створити тест":
         cmd_create(message)
     elif message.text == "📋 Мої тести / Редагувати":
         cmd_list_edit(message)
+    elif message.text == "🔍 Знайти тест":
+        cmd_search(message)
 
 def get_user_quiz_count(user_id):
     return len([q_id for q_id, q in db["quizzes"].items() if q["creator_id"] == user_id])
@@ -498,6 +500,117 @@ def input_set_correct(message, user_id):
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+# --- ДОДАТКОВІ ФУНКЦІЇ ДЛЯ ПРОХОДЖЕННЯ ТЕСТІВ ---
+
+def cmd_search(message):
+    msg = bot.send_message(message.chat.id, "🔍 Введіть ID тесту для пошуку:")
+    bot.register_next_step_handler(msg, process_search_quiz)
+
+
+def process_search_quiz(message):
+    quiz_id = message.text.strip()
+    quiz = db["quizzes"].get(quiz_id)
+
+    if not quiz:
+        bot.send_message(message.chat.id, "❌ Тест не знайдено.")
+        return
+
+    # Перевірка на пароль
+    if quiz.get("is_password_protected"):
+        msg = bot.send_message(message.chat.id, "🔑 Тест захищено паролем. Введіть пароль:")
+        bot.register_next_step_handler(msg, process_check_password, quiz_id)
+    else:
+        show_quiz_options(message.chat.id, quiz_id)
+
+
+def process_check_password(message, quiz_id):
+    password = get_safe_text(message)
+    quiz = db["quizzes"][quiz_id]
+
+    if hash_password(password) == quiz.get("password_hash"):
+        show_quiz_options(message.chat.id, quiz_id)
+    else:
+        bot.send_message(message.chat.id, "❌ Невірний пароль.")
+
+
+def show_quiz_options(chat_id, quiz_id):
+    quiz = db["quizzes"][quiz_id]
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🏆 Показати рейтинг", callback_data=f"rank_{quiz_id}"))
+    markup.add(types.InlineKeyboardButton("▶️ Пройти тест", callback_data=f"startq_{quiz_id}"))
+    bot.send_message(chat_id, f"✅ Тест знайдено: *{quiz['title']}*", reply_markup=markup, parse_mode="Markdown")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith(("rank_", "startq_")))
+def handle_quiz_actions(call):
+    chat_id = call.message.chat.id
+    action, quiz_id = call.data.split("_")
+
+    if action == "rank":
+        # Виведення Топ-10
+        quiz = db["quizzes"][quiz_id]
+        rating = sorted(quiz.get("rating", []), key=lambda x: x['score'], reverse=True)[:10]
+        text = f"🏆 Топ-10 для *{quiz['title']}*:\n"
+        for i, r in enumerate(rating):
+            text += f"{i + 1}. {r['name']} — {r['score']} правильних\n"
+        bot.send_message(chat_id, text or "📭 Рейтинг поки порожній.", parse_mode="Markdown")
+
+    elif action == "startq":
+        # Початок тесту
+        user_id = str(call.from_user.id)
+        edit_sessions[user_id] = {
+            "quiz_id": quiz_id,
+            "q_idx": 0,
+            "score": 0
+        }
+        ask_question(chat_id, user_id)
+
+
+def ask_question(chat_id, user_id, user_name=None):
+    session = edit_sessions.get(user_id)
+    if not session: return  # Захист
+
+    quiz = db["quizzes"][session["quiz_id"]]
+
+    if session["q_idx"] < len(quiz["questions"]):
+        q = quiz["questions"][session["q_idx"]]
+        markup = types.InlineKeyboardMarkup()
+        for i, opt in enumerate(q["options"]):
+            markup.add(types.InlineKeyboardButton(opt, callback_data=f"ans_{i}"))
+        bot.send_message(chat_id, f"❓ {q['text']}", reply_markup=markup)
+    else:
+        # Завершення тесту
+        final_score = session["score"]
+        bot.send_message(chat_id, f"🏁 Тест завершено! Ваш результат: {final_score} з {len(quiz['questions'])}")
+
+        # Збереження в рейтинг (використовуємо передане ім'я)
+        if user_name:
+            quiz["rating"].append({"name": user_name, "score": final_score})
+            db.sync()
+
+        del edit_sessions[user_id]
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ans_"))
+def handle_answer(call):
+    user_id = str(call.from_user.id)
+    session = edit_sessions.get(user_id)
+    if not session: return
+
+    quiz = db["quizzes"][session["quiz_id"]]
+    q = quiz["questions"][session["q_idx"]]
+    ans_idx = int(call.data.split("_")[1])
+
+    if ans_idx == q["correct"]:
+        session["score"] += 1
+        bot.answer_callback_query(call.id, "✅ Правильно!")
+    else:
+        bot.answer_callback_query(call.id, f"❌ Неправильно. Вірна відповідь: {q['options'][q['correct']]}")
+
+    session["q_idx"] += 1
+    ask_question(call.message.chat.id, user_id)
 
 
 # --- ЗАПУСК БОТА ---
