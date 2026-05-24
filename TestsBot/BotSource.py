@@ -82,7 +82,8 @@ def cmd_create(message):
 
 
 def process_init_title(message, user_id):
-    title = get_safe_text()
+    title = get_safe_text(message)
+
     if not title:
         msg = bot.send_message(message.chat.id, "❌ Назва не може бути порожньою або бути НЕ текстом. Введіть ще раз:")
         bot.register_next_step_handler(msg, process_init_title, user_id)
@@ -188,7 +189,6 @@ def show_editor_dashboard(chat_id, user_id, message_id=None):
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
     else:
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
-
 
 # --- ОБРОБКА ДІЙ КОРИСТУВАЧА (CALLBACK QUERIES) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ed_"))
@@ -400,7 +400,7 @@ def handle_password_actions(call):
 
 
 def process_set_password(message, user_id):
-    password = message.text.strip()
+    password = get_safe_text(message)
     session = edit_sessions.get(user_id)
     if not session: return
 
@@ -421,14 +421,14 @@ def process_set_password(message, user_id):
 # --- ФУНКЦІЇ ВВЕДЕННЯ ТЕКСТУ (NEXT STEP HANDLERS) ---
 
 def input_edit_title(message, user_id):
-    title = message.text.strip()
+    title = get_safe_text(message)
     if title:
         edit_sessions[user_id]["title"] = title
     show_editor_dashboard(message.chat.id, user_id)
 
 
 def input_add_question(message, user_id):
-    text = message.text.strip()
+    text = get_safe_text(message)
     if text:
         new_q = {"text": text, "options": ["Варіант 1", "Варіант 2"], "correct": 0}
         edit_sessions[user_id]["questions"].append(new_q)
@@ -438,7 +438,7 @@ def input_add_question(message, user_id):
 
 
 def input_edit_question(message, user_id):
-    text = message.text.strip()
+    text = get_safe_text(message)
     if text:
         idx = edit_sessions[user_id]["current_q_idx"]
         edit_sessions[user_id]["questions"][idx]["text"] = text
@@ -458,7 +458,7 @@ def input_select_question(message, user_id):
 
 
 def input_add_answer(message, user_id):
-    text = message.text.strip()
+    text = get_safe_text(message)
     if text:
         idx = edit_sessions[user_id]["current_q_idx"]
         edit_sessions[user_id]["questions"][idx]["options"].append(text)
