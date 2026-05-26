@@ -52,7 +52,7 @@ def start_handler(message):
 
     bot.send_message(
         message.chat.id,
-        f"👋 Привіт, {display_name}! Радий бачити тебе в ТІК Проєкті.\n"
+        f"👋 Привіт, {display_name}!\n"
         "Використовуй меню нижче для роботи з тестами:",
         reply_markup=get_main_menu()
     )
@@ -359,7 +359,7 @@ def handle_editor_callbacks(call):
             bot.send_message(chat_id, f"🎉 Тест успішно створено! ID: `{quiz_id}`", parse_mode="Markdown",
                              reply_markup=get_main_menu())
         else:
-            bot.send_message(chat_id, "💾 Зміни успішно збережено в оригінальний тест!",
+            bot.send_message(chat_id, "💾 Зміни успішно збережено в тест!",
                              reply_markup=get_main_menu())
 
         del edit_sessions[user_id]
@@ -555,7 +555,8 @@ def handle_quiz_actions(call):
         text = f"🏆 Топ-10 для *{quiz['title']}*:\n"
         for i, r in enumerate(rating):
             text += f"{i + 1}. {r['name']} — {r['score']} правильних\n"
-        bot.send_message(chat_id, text or "📭 Рейтинг поки порожній.", parse_mode="Markdown")
+        bot.send_message(chat_id, text if rating else "📭 Рейтинг поки порожній.", parse_mode="Markdown")
+
 
     elif action == "startq":
         # Початок тесту
@@ -610,7 +611,7 @@ def handle_answer(call):
         bot.answer_callback_query(call.id, f"❌ Неправильно. Вірна відповідь: {q['options'][q['correct']]}")
 
     session["q_idx"] += 1
-    ask_question(call.message.chat.id, user_id)
+    ask_question(call.message.chat.id, user_id, call.from_user.first_name)
 
 
 # --- ЗАПУСК БОТА ---
